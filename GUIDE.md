@@ -2,7 +2,7 @@
 
 面向三种客户端的完整接入指南：**WorkBuddy 桌面应用**、**Claude Code 命令行**、**OpenClaw + Telegram 多 bot**。覆盖单控制器 / 多控制器、单 MCP 实例 / 多 MCP 实例的全部组合，以及切换目标控制器的操作方法。
 
-> 前提：仓库已发布到 GitHub（下文以 `https://github.com/<你的用户名>/anpcmcp` 为例，请替换为实际地址）。
+> 前提：仓库已发布到 GitHub（下文以 `https://github.com/dablyo/anpcmcp` 为例，请替换为实际地址）。
 
 ---
 
@@ -41,19 +41,13 @@
 ### 方式一：pip 直接安装（推荐，仓库根目录即 pyproject 所在）
 
 ```bash
-pip install git+https://github.com/<你的用户名>/anpcmcp.git
+pip install git+https://github.com/dablyo/anpcmcp.git
 ```
 
-### 方式二：仓库根目录下还有 anp-mcp 子目录时
+### 方式二：克隆后可编辑安装（需要改代码时）
 
 ```bash
-pip install "git+https://github.com/<你的用户名>/anpcmcp.git#subdirectory=anp-mcp"
-```
-
-### 方式三：克隆后可编辑安装（需要改代码时）
-
-```bash
-git clone https://github.com/<你的用户名>/anpcmcp.git
+git clone https://github.com/dablyo/anpcmcp.git
 cd anpcmcp/anp-mcp        # 视仓库结构调整
 pip install -e .
 ```

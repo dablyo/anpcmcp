@@ -155,5 +155,3 @@ claude mcp add anp-bj \
 pip install -e ".[dev]"
 python -m pytest tests/ -q     # 90 用例，全离线（respx mock）
 ```
-
-设计文档见 `DESIGN.md`，实施计划见 `PLAN.md`。API 依据：《ANP控制器北向接口API说明书—业务管理分册-1 2025》《故障性能 2025》。
