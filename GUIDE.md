@@ -255,47 +255,83 @@ claude mcp add --scope user anp ...
 
 ### 6.2 模式 A（推荐）：每 bot 一个 MCP 实例
 
-在 OpenClaw 中为**每个 bot 的 agent** 分别注册 MCP server，env 各自指向自己的控制器。以 OpenClaw 的 agent/MCP 配置为例（字段名以你所用 OpenClaw 版本为准，核心是 `command` + `env`）：
+OpenClaw 通过配置文件中的 `mcp.servers` 块管理 MCP server（json5 格式），或用 `openclaw mcp add` 命令注册。**为每个 bot 部署独立的 OpenClaw 实例**（各自的配置文件），`mcp.servers` 里各挂一个指向自己控制器的 anp server：
 
-```yaml
-# bot: sh_noc_bot 的 agent 配置
-mcp_servers:
-  - name: anp
-    command: python
-    args: ["-m", "anp_mcp"]
-    env:
-      ANP_BASE_URL: https://10.1.203.3:8443
-      ANP_USERNAME: admin
-      ANP_PASSWORD: pass1
+```json5
+// bot: @sh_noc_bot 的 OpenClaw 配置
+{
+  mcp: {
+    servers: {
+      anp: {
+        command: "C:/Users/me/.anp-mcp/venv/Scripts/python.exe",  // Linux: /opt/anp-mcp/venv/bin/python
+        args: ["-m", "anp_mcp"],
+        env: {
+          ANP_BASE_URL: "https://10.1.203.3:8443",
+          ANP_USERNAME: "admin",
+          ANP_PASSWORD: "pass1",
+        },
+      },
+    },
+  },
+}
+```
 
-# bot: bj_noc_bot 的 agent 配置（另一个独立 agent）
-mcp_servers:
-  - name: anp
-    command: python
-    args: ["-m", "anp_mcp"]
-    env:
-      ANP_BASE_URL: https://10.1.204.125:8443
-      ANP_USERNAME: ops
-      ANP_PASSWORD: pass2
+```json5
+// bot: @bj_noc_bot 的 OpenClaw 配置（另一台机器/另一实例）
+{
+  mcp: {
+    servers: {
+      anp: {
+        command: "/opt/anp-mcp/venv/bin/python",
+        args: ["-m", "anp_mcp"],
+        env: {
+          ANP_BASE_URL: "https://10.1.204.125:8443",
+          ANP_USERNAME: "ops",
+          ANP_PASSWORD: "pass2",
+        },
+      },
+    },
+  },
+}
+```
+
+也可以用 CLI 注册（等价于上面的配置，保存前会自动 probe 验证可连接）：
+
+```bash
+openclaw mcp add anp \
+  --command /opt/anp-mcp/venv/bin/python \
+  --arg "-m" --arg "anp_mcp" \
+  --env ANP_BASE_URL=https://10.1.203.3:8443 \
+  --env ANP_USERNAME=admin --env ANP_PASSWORD=pass1
 ```
 
 要点：
 
-- 每个 bot 是**独立 agent + 独立 MCP 进程**，token 缓存与 401 重登互不可见——`@sh_noc_bot` 永远摸不到 beijing。
+- 每个 bot 是**独立实例 + 独立 MCP 进程**，token 缓存与 401 重登互不可见——`@sh_noc_bot` 永远摸不到 beijing。
 - bot 的系统提示词无需提及控制器选择，工具里没有歧义。
-- bot 数量多时进程数线性增长；每个实例空闲时几乎零开销（连接懒加载，首次调用才登录）。
+- 进程随会话管理：会话存活期间 MCP 运行时保持驻留（含静默期），会话重置/删除或 Gateway 关闭时自动回收 stdio 子进程；可用 `mcp.sessionIdleTtlMs` 配置空闲回收（如 `3600000` = 1 小时无使用即回收）。
+- bot 数量多时进程数线性增长；每个实例空闲时几乎零开销（连接懒加载，首次调用才登录）。每个 Gateway 最多容纳 256 个 MCP 运行时，超限后新会话接入失败。
 
 ### 6.3 模式 B（备选）：所有 bot 共享一个多控制器实例
 
-所有 bot 的 agent 挂同一个 MCP server：
+bot 多但想省资源时，共用一个挂多控制器的 server，用 `toolFilter` 和提示词双重约束：
 
-```yaml
-mcp_servers:
-  - name: anp-multi
-    command: python
-    args: ["-m", "anp_mcp"]
-    env:
-      ANP_CONTROLLERS_FILE: /home/openclaw/.anp-mcp/controllers.json
+```json5
+{
+  mcp: {
+    servers: {
+      "anp-multi": {
+        command: "/opt/anp-mcp/venv/bin/python",
+        args: ["-m", "anp_mcp"],
+        env: {
+          ANP_CONTROLLERS_FILE: "/home/openclaw/.anp-mcp/controllers.json",
+        },
+        // 可选：每个 bot 的 agent 只投影需要的工具（工具名支持 * 通配）
+        // toolFilter: { include: ["anp_alarm_*", "anp_ping", "anp_controllers"] },
+      },
+    },
+  },
+}
 ```
 
 然后**在每个 bot 的系统提示词中锁定它的控制器**：
@@ -307,7 +343,22 @@ mcp_servers:
 
 ⚠️ 模式 B 的隔离靠提示词约束，是软隔离——bot 理论上仍可传其他 controller 值。对安全边界有要求（如不同租户的运维 bot）务必用模式 A。
 
-### 6.4 Telegram 侧验证清单
+### 6.4 OpenClaw MCP 日常管理命令
+
+```bash
+openclaw mcp list              # 列出 mcp.servers 里已配置的 server
+openclaw mcp show anp          # 查看某 server 的完整配置
+openclaw mcp probe             # 实际连接并列出可用的工具/资源
+openclaw mcp status            # 不连接，只看各 server 的传输状态
+openclaw mcp doctor            # 静态配置体检；--fix 自动修复常见问题
+openclaw mcp reload            # 丢弃缓存的 MCP 运行时，使新配置在下一轮对话生效
+openclaw mcp configure anp ... # 改 operator 控制项而不整体替换 server 定义
+openclaw mcp unset anp         # 移除
+```
+
+配置变更的生效机制：改动只回收**发生变化或被移除**的 server 连接，未变的 server 保持传输与工具目录不受影响；无需重启 Gateway。
+
+### 6.5 Telegram 侧验证清单
 
 每个 bot 上线后，在对应聊天里依次发：
 
@@ -324,7 +375,7 @@ mcp_servers:
 |---|---|---|
 | **① 工具参数路由** | 单实例多控制器 | 任意工具传 `"controller": "<名字>"`；先调 `anp_controllers` 可列出全部目标及其 probe 状态 |
 | **② 点名 server** | 多实例 | 对话中指定用哪个 server（WorkBuddy/Claude Code 按工具前缀区分，如 `mcp__anp-bj__*`） |
-| **③ 改配置重启** | 任何形态 | 修改 `controllers.json` 的 `default` 键或 env 变量，重启客户端/MCP 进程后生效（对话说「重载 anp 的 MCP 配置」或重开会话） |
+| **③ 改配置重载** | 任何形态 | 修改 `controllers.json` 的 `default` 键或 env 变量后生效：WorkBuddy 重开会话；Claude Code 重启会话；OpenClaw 执行 `openclaw mcp reload`（下一轮对话生效，未变更的 server 连接不受影响） |
 
 日常推荐：单实例用户固定用 ①（说「查 beijing 的…」即可）；多实例用户固定用 ②；换账号/加控制器等结构性变更走 ③。
 
