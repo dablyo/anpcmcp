@@ -370,4 +370,4 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 
 ---
 
-配置字段、认证流程与全部 15 个工具的详细说明见 `README.md`；架构设计见 `DESIGN.md`。
+配置字段、认证流程与全部 15 个工具的详细说明见 `README.md`。
