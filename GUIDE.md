@@ -64,7 +64,7 @@ python -c "import anp_mcp; print('ok')"
 生产环境建议锁定 commit，避免上游变更直接影响：
 
 ```bash
-pip install "git+https://github.com/<你的用户名>/anpcmcp.git@<commit-sha>#subdirectory=anp-mcp"
+pip install "git+https://github.com/dablyo/anpcmcp.git@<commit-sha>#subdirectory=anp-mcp"
 ```
 
 > 注意：依赖钉在 `mcp<2`（mcp 2.x 将 FastMCP 改名为 MCPServer，不兼容）。pip 会自动解析，不要手动升级 mcp 到 2.x。

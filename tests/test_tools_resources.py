@@ -13,7 +13,7 @@ SITE = CrudSpec("anp_site_ops", "/rest/site/v1", "站点")
 TENANT = CrudSpec("anp_tenant_ops", "/rest/tenant/v1", "租户",
                   actions=("list", "get", "create", "update", "set_quota", "delete"))
 ASSET = CrudSpec("anp_asset_ops", "/rest/assets/v1", "设备资产",
-                 actions=("list", "get", "create", "update", "get_cert", "delete"))
+                 actions=("list", "create", "update", "get_cert", "delete"))
 
 
 @pytest.fixture
@@ -87,9 +87,31 @@ async def test_asset_get_cert(registry, mock_controller):
     assert route.calls.last.request.url.params["ip"] == "10.1.203.71"
 
 
-async def test_asset_get_cert_requires_ip(registry, mock_controller):
+async def test_asset_get_cert_by_sn(registry, mock_controller):
+    """后端 GenerateCertV1 同时支持 sn（硬件序列号）与 ip 两种参数。"""
+    route = mock_controller.get("https://sh.test/rest/assets/v1/cert").mock(
+        return_value=httpx.Response(200, json={"code": 0, "value": "dev-id"}))
+    await make_crud_tool(registry, ASSET)(action="get_cert", extra={"sn": "SN123456"})
+    q = route.calls.last.request.url.params
+    assert q["sn"] == "SN123456" and "ip" not in q
+
+
+async def test_asset_get_cert_requires_ip_or_sn(registry, mock_controller):
     out = json.loads(await make_crud_tool(registry, ASSET)(action="get_cert"))
-    assert "error" in out and "ip" in out["error"]
+    assert "error" in out and "ip" in out["error"] and "sn" in out["error"]
+
+
+async def test_asset_get_not_supported(registry, mock_controller):
+    """后端无 GET /assets/v1/{id} 路由，get 必须不可用。"""
+    out = json.loads(await make_crud_tool(registry, ASSET)(action="get", resource_id="a1"))
+    assert "error" in out and "unknown action" in out["error"]
+
+
+def test_production_asset_spec_has_no_get():
+    """生产注册的 asset spec 必须与后端路由一致：无 get。"""
+    import anp_mcp.tools.resources as mod
+    assert "get" not in mod.ASSET_SPEC.actions
+    assert "get_cert" in mod.ASSET_SPEC.actions
 
 
 async def test_staticroute_list_by_device(registry, mock_controller):

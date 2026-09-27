@@ -42,7 +42,8 @@ def make_crud_tool(registry: ControllerRegistry, spec: CrudSpec):
     destructive = ("DESTRUCTIVE: delete 不可逆，慎用。" if "delete" in spec.actions else "")
     extras = [a for a in spec.actions if a not in ("list", "get", "create", "update", "delete")]
     extras_note = "；扩展 action：" + "、".join(
-        f"{a}" + ("（body=对象）" if a == "set_quota" else "（extra={'ip': ...}）" if a == "get_cert" else "")
+        f"{a}" + ("（body=对象）" if a == "set_quota"
+                  else "（extra={'ip'|'sn': ...}）" if a == "get_cert" else "")
         for a in extras) if extras else ""
 
     @mcp_tool_wrapper
@@ -65,12 +66,15 @@ def make_crud_tool(registry: ControllerRegistry, spec: CrudSpec):
             return fmt_result(client.profile.name, await client.request(
                 "PUT", f"{spec.base_path}/quota", json_body=body))
         if action == "get_cert":
-            ip = (extra or {}).get("ip")
-            if not ip:
+            # 后端 GenerateCertV1 支持 ip（vCPE）与 sn（硬件序列号）两种参数；
+            # 需运营方账户（租户账户会 403）。
+            cert_params = {k: v for k in ("ip", "sn") if (v := (extra or {}).get(k))}
+            if not cert_params:
                 return tool_error(client.profile.name,
-                                  "action 'get_cert' requires extra={'ip': ...}")
+                                  "action 'get_cert' requires extra={'ip': ...} "
+                                  "or extra={'sn': ...}")
             return fmt_result(client.profile.name, await client.request(
-                "GET", f"{spec.base_path}/cert", params={"ip": ip}))
+                "GET", f"{spec.base_path}/cert", params=cert_params))
         list_params = {k: v for k, v in {"pageNo": pageNo, "pageSize": pageSize,
                                          "tenantId": tenantId}.items() if v is not None}
         result = _apply_standard_action(client, spec, action, resource_id,
@@ -135,13 +139,15 @@ def make_anp_staticroute_ops(registry: ControllerRegistry):
     return anp_staticroute_ops
 
 
+SITE_SPEC = CrudSpec("anp_site_ops", "/rest/site/v1", "站点")
+TENANT_SPEC = CrudSpec("anp_tenant_ops", "/rest/tenant/v1", "租户",
+                       actions=("list", "get", "create", "update", "set_quota", "delete"))
+# 后端无 GET /assets/v1/{id} 路由，故不提供 get（nbi/asset/rest.go）
+ASSET_SPEC = CrudSpec("anp_asset_ops", "/rest/assets/v1", "设备资产",
+                      actions=("list", "create", "update", "get_cert", "delete"))
+
+
 def register(mcp: FastMCP, registry: ControllerRegistry) -> None:
-    for spec in (
-        CrudSpec("anp_site_ops", "/rest/site/v1", "站点"),
-        CrudSpec("anp_tenant_ops", "/rest/tenant/v1", "租户",
-                 actions=("list", "get", "create", "update", "set_quota", "delete")),
-        CrudSpec("anp_asset_ops", "/rest/assets/v1", "设备资产",
-                 actions=("list", "get", "create", "update", "get_cert", "delete")),
-    ):
+    for spec in (SITE_SPEC, TENANT_SPEC, ASSET_SPEC):
         mcp.tool()(make_crud_tool(registry, spec))
     mcp.tool()(make_anp_staticroute_ops(registry))

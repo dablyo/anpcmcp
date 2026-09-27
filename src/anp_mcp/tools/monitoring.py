@@ -4,8 +4,6 @@
 """
 from __future__ import annotations
 
-import json
-
 from mcp.server.fastmcp import FastMCP
 
 from ..registry import ControllerRegistry
@@ -32,8 +30,13 @@ def make_anp_alarm_active(registry: ControllerRegistry):
                                controller: str | None = None) -> str:
         """读取 ANP 控制器当前激活告警列表。可选 deviceid 过滤指定设备、pageSize 页大小。"""
         client = registry.get(controller)
-        params = {"pageSize": pageSize} if pageSize is not None else None
-        path = f"/rest/fm/active/v1/{deviceid}" if deviceid else "/rest/fm/active/v1"
+        if deviceid:
+            # 后端按设备查询只认 offset/limit（fm/rest_service.go getActiveAlarmByDeviceid）
+            params = {"limit": pageSize} if pageSize is not None else None
+            path = f"/rest/fm/active/v1/{deviceid}"
+        else:
+            params = {"pageSize": pageSize} if pageSize is not None else None
+            path = "/rest/fm/active/v1"
         return fmt_result(client.profile.name,
                           await client.request("GET", path, params=params))
     return anp_alarm_active
@@ -71,8 +74,9 @@ def make_anp_operlog_query(registry: ControllerRegistry):
                                 filterValue: str | None = None,
                                 actions: list[str] | None = None,
                                 controller: str | None = None) -> str:
-        """条件查询 ANP 控制器操作日志。filterType 取值 username/ip/position/action；
-        filterType=action 时配合 actions 列表过滤；pageSize/pageIndex 分页。"""
+        """条件查询 ANP 控制器操作日志。filterType 取值 username/ip/position/action/accessType；
+        filterType=action 时配合 actions 列表过滤；filterType=position 时 filterValue 需为
+        JSON 数组字符串（如 '["site-a"]'）；pageSize/pageIndex 分页。"""
         client = registry.get(controller)
         param: dict = {}
         if pageSize is not None:
@@ -85,9 +89,9 @@ def make_anp_operlog_query(registry: ControllerRegistry):
             param["filterValue"] = filterValue
         if actions:
             param["actions"] = actions
+        # 后端只注册 POST，从 JSON body 解析 WEBOperLogQueryReq（maintain/logsrv）
         return fmt_result(client.profile.name, await client.request(
-            "GET", "/api/maintain/log/queryoperlog",
-            params={"param": json.dumps(param)}))
+            "POST", "/api/maintain/log/queryoperlog", json_body=param))
     return anp_operlog_query
 
 
@@ -95,11 +99,13 @@ def make_anp_pm_query(registry: ControllerRegistry):
     @mcp_tool_wrapper
     async def anp_pm_query(metric_type: str, since: str, before: str,
                            tenantid: str | None = None, pageSize: int | None = None,
+                           devId: str | None = None, granu: int | None = None,
                            controller: str | None = None) -> str:
         """读取 ANP 控制器性能指标。metric_type 必填，取值：
         port(端口)/tunnel(隧道)/appcat(应用分类)/pathquality(隧道质量)/sys(系统)/
         syscpu(系统CPU)/sysvol(系统文件系统)/hybrid(转发面设备混合)/host_hybrid(主机混合)。
-        since/before 必填，格式 YYYY-MM-DD HH:MM:SS；tenantid/pageSize 可选。"""
+        since/before 必填，格式 YYYY-MM-DD HH:MM:SS；
+        tenantid/pageSize/devId/granu（粒度秒，默认 3600）可选。"""
         if metric_type not in PM_METRIC_PATHS:
             return tool_error(controller or registry.default_name,
                               f"unknown metric_type '{metric_type}'; valid: "
@@ -107,9 +113,14 @@ def make_anp_pm_query(registry: ControllerRegistry):
         client = registry.get(controller)
         params: dict = {"since": since, "before": before}
         if tenantid is not None:
-            params["tenantid"] = tenantid
+            # 后端读 "tenantId"，查询参数大小写敏感（cmsoft_cpe_rest.go）
+            params["tenantId"] = tenantid
         if pageSize is not None:
             params["pageSize"] = pageSize
+        if devId is not None:
+            params["devId"] = devId
+        if granu is not None:
+            params["granu"] = granu
         return fmt_result(client.profile.name,
                           await client.request("GET", PM_METRIC_PATHS[metric_type],
                                                params=params))

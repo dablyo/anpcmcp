@@ -42,6 +42,15 @@ async def test_alarm_active_by_deviceid(registry, mock_controller):
     assert route.called
 
 
+async def test_alarm_active_by_deviceid_maps_pagesize_to_limit(registry, mock_controller):
+    """后端按设备查告警只认 offset/limit（fm/rest_service.go getActiveAlarmByDeviceid）。"""
+    route = mock_controller.get("https://sh.test/rest/fm/active/v1/dev-1").mock(
+        return_value=httpx.Response(200, json={"code": 0, "value": []}))
+    await make_anp_alarm_active(registry)(deviceid="dev-1", pageSize=100)
+    q = route.calls.last.request.url.params
+    assert q["limit"] == "100" and "pageSize" not in q
+
+
 async def test_alarm_cleared(registry, mock_controller):
     route = mock_controller.get("https://sh.test/rest/fm/cleared/v1").mock(
         return_value=httpx.Response(200, json={"code": 0, "value": []}))
@@ -56,14 +65,15 @@ async def test_alarm_notification(registry, mock_controller):
     assert route.called
 
 
-async def test_operlog_param_json(registry, mock_controller):
-    route = mock_controller.get("https://sh.test/api/maintain/log/queryoperlog").mock(
+async def test_operlog_post_json_body(registry, mock_controller):
+    """后端只注册 POST /api/maintain/log/queryoperlog，从 JSON body 解析（logsrv/export.go）。"""
+    route = mock_controller.post("https://sh.test/api/maintain/log/queryoperlog").mock(
         return_value=httpx.Response(200, json={"code": 0, "value": {}}))
     await make_anp_operlog_query(registry)(pageSize=50, pageIndex=0, filterType="action",
                                            filterValue="x", actions=["ADD_APP_RULE"])
-    param = json.loads(route.calls.last.request.url.params["param"])
-    assert param == {"pageSize": 50, "pageIndex": 0, "filterType": "action",
-                     "filterValue": "x", "actions": ["ADD_APP_RULE"]}
+    assert json.loads(route.calls.last.request.content) == {
+        "pageSize": 50, "pageIndex": 0, "filterType": "action",
+        "filterValue": "x", "actions": ["ADD_APP_RULE"]}
 
 
 @pytest.mark.parametrize("metric_type,path", [
@@ -86,6 +96,7 @@ async def test_pm_metric_all_9_types(registry, mock_controller, metric_type, pat
 
 
 async def test_pm_forwards_tenantid(registry, mock_controller):
+    """后端读 URLParam("tenantId")，大小写敏感（cmsoft_cpe_rest.go）。"""
     route = mock_controller.get("https://sh.test/rest/pm/port/v1").mock(
         return_value=httpx.Response(200, json={"code": 0, "value": []}))
     await make_anp_pm_query(registry)(metric_type="port",
@@ -94,7 +105,19 @@ async def test_pm_forwards_tenantid(registry, mock_controller):
                                       tenantid="00000000-0000-0000-0000-000000000000",
                                       pageSize=500)
     q = route.calls.last.request.url.params
-    assert q["tenantid"].startswith("0000") and q["pageSize"] == "500"
+    assert q["tenantId"].startswith("0000") and q["pageSize"] == "500"
+    assert "tenantid" not in q
+
+
+async def test_pm_forwards_devid_and_granu(registry, mock_controller):
+    route = mock_controller.get("https://sh.test/rest/pm/tunnel/v1").mock(
+        return_value=httpx.Response(200, json={"code": 0, "value": []}))
+    await make_anp_pm_query(registry)(metric_type="tunnel",
+                                      since="2026-09-25 10:00:00",
+                                      before="2026-09-25 11:00:00",
+                                      devId="dev-9", granu=600)
+    q = route.calls.last.request.url.params
+    assert q["devId"] == "dev-9" and q["granu"] == "600"
 
 
 async def test_pm_unknown_metric_type_error(registry, mock_controller):
